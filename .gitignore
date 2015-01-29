@@ -1,5 +1,5 @@
+/venv/*
+/ale/*
 mt.sublime-project
 mt.sublime-workspace
-/venv/**
-/ale/**
 *.pyc
