@@ -37,9 +37,9 @@ class MemoryD:
         @param n: the number of game steps we need to store
         """
         self.size = n
-        self.screens = np.empty((n, 84, 84), dtype=np.float32)
+        self.screens = np.empty((n, 1, 84, 84), dtype=np.float64)
         self.actions = np.empty((n,), dtype=np.uint8)
-        self.rewards = np.empty((n,), dtype=np.float32)
+        self.rewards = np.empty((n,), dtype=np.float64)
         self.time = np.empty((n,), dtype=np.uint32)
         self.count = -1
 
@@ -81,10 +81,10 @@ class MemoryD:
         Returns ndarray with 4 lists inside (at Tambet's request)
         @param size: size of the minibatch (in our case it should be 32)
         """
-        prestates = np.empty((size,4,84,84), dtype = np.float32)
-        actions = np.empty((size), dtype=np.float32)
-        rewards = np.empty((size), dtype=np.float32)
-        poststates = np.empty((size,4,84,84), dtype = np.float32)
+        prestates = np.empty((size,4,84,84), dtype = np.float64)
+        actions = np.empty((size), dtype=np.float64)
+        rewards = np.empty((size), dtype=np.float64)
+        poststates = np.empty((size,4,84,84), dtype = np.float64)
 
         #: Pick random n indices and save dictionary if not terminal state
         j = 0
@@ -122,7 +122,7 @@ class MemoryD:
         pad_screens = 3 - self.time[index]
         if pad_screens > 0:
 
-            state = np.empty((4, 84, 84), dtype=np.float32)
+            state = np.empty((4, 84, 84), dtype=np.float64)
 
             #: Pad missing images with the first image
             for p in range(pad_screens):
@@ -131,7 +131,6 @@ class MemoryD:
             #: Fill the rest of the images as they are
             for p in range(pad_screens, 4):
                 state[p] = self.screens[index - 3 + p]
-
         else:
             ind_start_window = index - 3
             ind_end_window = index + 1
@@ -139,6 +138,7 @@ class MemoryD:
                 state = np.vstack([self.screens[ind_start_window:], self.screens[:ind_end_window]])
             else:
                 state = self.screens[index - 3:index + 1]
+            state = state[:,0,:,:]
 
         # neural network expects flat input and np.ravel does just that
         return state
