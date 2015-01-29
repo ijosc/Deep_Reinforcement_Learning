@@ -1,7 +1,6 @@
 from utils.ale_interface import ALE
 from memory.memoryd import MemoryD
-from ai.deepmind_net import net
-
+from ai.deepmind_net import net as net
 
 import random
 import numpy as np
@@ -14,7 +13,8 @@ from os import linesep as NL
 class Main(object):
     """
     Main class for starting training and testing
-    """
+   """
+ 
     # How many transitions to keep in memory?
     memory_size = 500000
 
@@ -27,8 +27,10 @@ class Main(object):
     # Size of one frame
     frame_size = 84*84
 
+    state_length = 4 
+
     # Size of one state is four 84x84 screens
-    state_size = 4 * frame_size
+    state_size = state_length * frame_size
 
     # Discount factor for future rewards
     discount_factor = 0.9
@@ -62,12 +64,13 @@ class Main(object):
 
     def __init__(self):
         self.memory = MemoryD(self.memory_size)
-        self.ale = ALE(display_screen="true", skip_frames=4, game_ROM='ale/roms/breakout.bin')
+        self.ale = ALE(display_screen="false", skip_frames=4, game_ROM='ale/roms/breakout.bin')
         self.nnet = net
-        self.trainer = dp.StochasticGradientDescent(
-                max_epochs=100,
-                learn_rule=dp.Momentum(learn_rate=0.01, momentum=0.9),
-            )
+        self.trainer =dp.StochasticGradientDescent(
+            max_epochs=1,
+            learn_rule=dp.Momentum(learn_rate=0.001, momentum=0.9),
+        )
+
     def compute_epsilon(self, frames_played):
         """
         From the paper: "The behavior policy during training was epsilon-greedy
@@ -78,7 +81,6 @@ class Main(object):
 
     def predict_best_action(self, last_state):
         # last_state contains only one state, so we have to convert it into batch of size 1
-        last_state.shape = (last_state.shape[0], 1)
 
         # use neural net to predict Q-values for all actions
         qvalues = self.nnet.predict(last_state)
@@ -94,21 +96,13 @@ class Main(object):
         @param minibatch: list of arrays: prestates, actions, rewards, poststates
         """
         prestates, actions, rewards, poststates = minibatch
-
-        print prestates.shape
         prestates = dp.Input(prestates)
-        print prestates.n_samples, prestates.n_batches, prestates.batch_size
-
-        # sys.exit()
 
         # predict Q-values for prestates, so we can keep Q-values for other actions unchanged
         qvalues = self.nnet.predict(prestates)
-        #print "Prestate q-values: ", qvalues[0,:]
-        #print "Action was: %d, reward was %d" % (actions[0], rewards[0])
 
         # predict Q-values for poststates
         post_qvalues = self.nnet.predict(poststates)
-        #print "Poststate q-values: ", post_qvalues[0,:]
 
         # take maximum Q-value of all actions
         max_qvalues = np.max(post_qvalues, axis = 1)
@@ -116,18 +110,12 @@ class Main(object):
         # update the Q-values for the actions we actually performed
         for i, action in enumerate(actions):
             qvalues[i][action] = rewards[i] + self.discount_factor * max_qvalues[i]
-        #print "Corrected q-values: ", qvalues[0,:]
 
-        # we have to transpose prediction result, as train expects input in opposite order
-        # def val_error():
-        #     return net.error(test_input)
+        train_input = dp.SupervisedInput(prestates.x, qvalues, batch_size=32)
+        self.trainer.train(net, train_input)
 
-        self.trainer.train(net, prestates)
-
-        error = self.nnet.error(prestates)
-
-        #qvalues = self.nnet.predict(prestates)
-        #print "After training: ", qvalues[0,:]
+        error = self.nnet.error(train_input)
+        print "error: " + str(error)
 
         return error
         
@@ -153,13 +141,21 @@ class Main(object):
         # We need to initialize/update the current state
         if self.current_state == None:
             print "current state is none"
-            self.current_state = [first_frame.copy(),first_frame.copy(),first_frame.copy(),first_frame.copy()]
-
+            self.current_state = np.empty((1, self.state_length, 84, 84), dtype=np.float64)
+            for i in range(self.state_length):
+                self.current_state[0,i,:,:] = first_frame.copy()
         else:
-            self.current_state = self.current_state[1:]+[first_frame]
-
+            for i in range(self.state_length):
+                if i<3:
+                    self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
+                else:
+                    self.current_state.x[0,i,:,:] = first_frame
 
         game_score = 0
+        if train:
+            self.current_state = dp.Input(self.current_state)
+            self.current_state.y_shape=(1,6)
+            self.nnet._setup(self.current_state)
 
         # Play games until maximum number is reached
         while frames_played < nr_frames:
@@ -169,14 +165,13 @@ class Main(object):
                 epsilon = self.compute_epsilon(self.total_frames_trained)
                 print "Current annealed epsilon is %f at %d frames" % (epsilon, self.total_frames_trained)
 
-            # Some times random action is chosen
+            # Some times random action is chosen 
             if random.uniform(0, 1) < epsilon:
                 action = random.choice(range(self.number_of_actions))
                 print "Chose random action %d" % action
             # Usually neural net chooses the best action
             else:
-                #action = self.predict_best_action(self.memory.get_last_state())
-                action = self.predict_best_action(np.ravel(self.current_state))
+                action = self.predict_best_action(self.current_state)
                 print "Neural net chose action %d" % int(action)
 
             # Make the move. Returns points received and the new state
@@ -195,7 +190,12 @@ class Main(object):
             #print "Played frame %d" % frames_played
 
             # We need to update the current state
-            self.current_state = self.current_state[1:]+[next_frame]
+
+            for i in range(self.state_length):
+                if i<3:
+                    self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
+                else:
+                    self.current_state.x[0,i,:,:] = next_frame
 
             # Only if training
             if train:
@@ -226,7 +226,6 @@ class Main(object):
                     self.memory.add_last()
                 else:
                     pass
-
                 first_frame = self.ale.new_game()
                 if train:
                     self.memory.add_first(first_frame)
@@ -241,15 +240,6 @@ class Main(object):
 
         return game_scores
     def run(self, epochs, training_frames, testing_frames):
-        # Open log files and write headers
-        # timestamp = time.strftime("%Y-%m-%d-%H-%M")
-        # log_train = open("../log/training_" + timestamp + ".csv", "w")
-        # log_train.write("epoch,nr_games,sum_score,average_score,nr_frames,total_frames_trained,epsilon,memory_size\n")
-        # log_test = open("../log/testing_" + timestamp + ".csv", "w")
-        # log_test.write("epoch,nr_games,sum_score,average_score,average_qvalue,nr_frames,epsilon,memory_size\n")
-        # log_train_scores = open("../log/training_scores_" + timestamp + ".txt", "w")
-        # log_test_scores = open("../log/testing_scores_" + timestamp + ".txt", "w")
-        # log_weights = open("../log/weights_" + timestamp + ".csv", "w")
 
         for epoch in range(1, epochs + 1):
             print "Epoch %d:" % epoch
@@ -259,44 +249,11 @@ class Main(object):
                 print "  Training for %d frames" % training_frames
                 training_scores = self.play_games(training_frames, train = True)
 
-                # log training scores
-                # log_train_scores.write(NL.join(map(str, training_scores)) + NL)
-                # log_train_scores.flush()
-
-                # log aggregated training data
-                # train_data = (epoch, len(training_scores), sum(training_scores), np.mean(training_scores), training_frames, self.total_frames_trained, self.compute_epsilon(self.total_frames_trained), self.memory.count)
-                # log_train.write(','.join(map(str, train_data)) + NL)
-                # log_train.flush()
-
-                # weights = self.nnet.get_weight_stats()
-                # if epoch == 1:
-                #     # write header
-                #     wlayers = []
-                #     for (layer, index) in weights:
-                #         wlayers.extend([layer, index, ''])
-                #     log_weights.write(','.join(wlayers) + NL)
-                #     wlabels = []
-                #     for (layer, index) in weights:
-                #         wlabels.extend(['weights', 'weightsInc', 'incRatio'])
-                #     log_weights.write(','.join(wlabels) + NL)
-                # wdata = []
-                # for w in weights.itervalues():
-                #     wdata.extend([str(w[0]), str(w[1]), str(w[1] / w[0] if w[0] > 0 else 0)])
-                # log_weights.write(','.join(wdata) + NL)
-                # log_weights.flush()
-
-                # save network state
-                #self.nnet.save_network(epoch)
-                print   # save_network()'s output doesn't include newline
 
             if testing_frames > 0:
                 # play number of frames without training and without epsilon annealing
                 print "  Testing for %d frames" % testing_frames
                 testing_scores = self.play_games(testing_frames, train = False, epsilon = self.test_epsilon)
-
-                # log testing scores
-                # log_test_scores.write(NL.join(map(str, testing_scores)) + NL)
-                # log_test_scores.flush()
 
                 # Pick random states to calculate Q-values for
                 if self.random_states is None and self.memory.count > self.nr_random_states:
@@ -316,27 +273,12 @@ class Main(object):
                 else:
                     avg_qvalue = 0
 
-                # log aggregated testing data
-                # test_data = (epoch, len(testing_scores), sum(testing_scores), np.mean(testing_scores), avg_qvalue, testing_frames, self.test_epsilon, self.memory.count)
-                # log_test.write(','.join(map(str, test_data)) + NL)
-                # log_test.flush()
-
-        # log_train.close()
-        # log_test.close()
-        # log_train_scores.close()
-        # log_test_scores.close()
-        # log_weights.close()
 
 if __name__ == '__main__':
-    # ignore cuda-convnet options at start of command line
-    i = 1
-    while (i < len(sys.argv) and sys.argv[i].startswith('--')):
-        i += 2
-
     # take some parameters from command line, otherwise use defaults
-    epochs = int(sys.argv[i]) if len(sys.argv) > i else 100
-    training_frames = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 1000
-    testing_frames = int(sys.argv[i + 2]) if len(sys.argv) > i + 2 else 1000
+    epochs = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    training_frames = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
+    testing_frames = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
 
     m = Main()
     m.run(epochs, training_frames, testing_frames)
