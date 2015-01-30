@@ -121,7 +121,7 @@ class Main(object):
 
         return error
         
-    def play_games(self, nr_frames, train, epsilon = None):
+    def play_games(self, nr_frames, epoch, train, epsilon = None):
         """
         Main cycle: starts a game and plays number of frames.
         @param nr_frames: total number of games allowed to play
@@ -154,7 +154,7 @@ class Main(object):
                     self.current_state.x[0,i,:,:] = first_frame.copy()
 
         game_score = 0
-        if train:
+        if train and epoch==1:
             self.current_state = dp.Input(self.current_state)
             self.current_state.y_shape=(1,6)
             self.nnet._setup(self.current_state)
@@ -254,13 +254,13 @@ class Main(object):
             if training_frames > 0:
                 # play number of frames with training and epsilon annealing
                 print "  Training for %d frames" % training_frames
-                training_scores = self.play_games(training_frames, train = True)
+                training_scores = self.play_games(training_frames, epoch, train = True)
 
 
             if testing_frames > 0:
                 # play number of frames without training and without epsilon annealing
                 print "  Testing for %d frames" % testing_frames
-                testing_scores = self.play_games(testing_frames, train = False, epsilon = self.test_epsilon)
+                testing_scores = self.play_games(testing_frames, epoch, train = False, epsilon = self.test_epsilon)
 
                 # Pick random states to calculate Q-values for
                 if self.random_states is None and self.memory.count > self.nr_random_states:
@@ -281,7 +281,8 @@ class Main(object):
                     avg_qvalue = 0
 
         # save q-values to review learning progress
-        pickle.dump(self.q_values, open( "q_values.p", "wb" ) )
+        pickle.dump([self.q_values,testing_scores], open("q_values.p", "wb" ))
+        pickle.dump(self.nnet, open("nnet.p", "wb" ))
 
 if __name__ == '__main__':
     # take some parameters from command line, otherwise use defaults
