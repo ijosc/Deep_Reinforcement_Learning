@@ -6,6 +6,8 @@ import random
 import numpy as np
 import time
 import sys
+import cPickle as pickle
+
 import deeppy as dp
 
 from os import linesep as NL
@@ -67,9 +69,10 @@ class Main(object):
         self.ale = ALE(display_screen="false", skip_frames=4, game_ROM='ale/roms/breakout.bin')
         self.nnet = net
         self.trainer =dp.StochasticGradientDescent(
-            max_epochs=1,
+            max_epochs=10,
             learn_rule=dp.Momentum(learn_rate=0.001, momentum=0.9),
         )
+        self.q_values = []
 
     def compute_epsilon(self, frames_played):
         """
@@ -80,11 +83,10 @@ class Main(object):
         return max(0.99 - frames_played / self.epsilon_frames, 0.1)
 
     def predict_best_action(self, last_state):
-        # last_state contains only one state, so we have to convert it into batch of size 1
-
         # use neural net to predict Q-values for all actions
         qvalues = self.nnet.predict(last_state)
         print "Predicted action Q-values: ", qvalues
+        self.q_values.append(np.max(qvalues))
 
         # return action (index) with maximum Q-value
         return np.argmax(qvalues)
@@ -149,7 +151,7 @@ class Main(object):
                 if i<3:
                     self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
                 else:
-                    self.current_state.x[0,i,:,:] = first_frame
+                    self.current_state.x[0,i,:,:] = first_frame.copy()
 
         game_score = 0
         if train:
@@ -233,7 +235,12 @@ class Main(object):
                     pass
 
                 # We need to update the current state
-                self.current_state = self.current_state[1:]+[first_frame]
+                for i in range(self.state_length):
+                    if i<3:
+                        self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
+                    else:
+                        self.current_state.x[0,i,:,:] = first_frame.copy()
+
 
         # reset the game just in case
         self.ale.end_game()
@@ -273,6 +280,8 @@ class Main(object):
                 else:
                     avg_qvalue = 0
 
+        # save q-values to review learning progress
+        pickle.dump(self.q_values, open( "q_values.p", "wb" ) )
 
 if __name__ == '__main__':
     # take some parameters from command line, otherwise use defaults
