@@ -7,7 +7,7 @@ My thesis is inspired by this DeepMind article http://arxiv.org/abs/1312.5602. M
 - Experimenting with different CNN architectures (filter sizes, pooling layers, hyper parameters, etc.)
 - Implementing and experimenting with the saddle-free newton method (http://arxiv.org/abs/1406.2572)
 - Experimenting with different games and investigating the applicability of various setups/architectures for transfer learning
-- Implement RNN layers and experiment with various configurations for final layers
+- Implementing RNN layers and experimenting with various configurations for final layers
 
 The tools I am using are
 [Deeppy](https://github.com/andersbll/deeppy),
