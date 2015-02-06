@@ -1,5 +1,5 @@
 # Deep Reinforcement Learning
-This is the python code for my master thesis titled'Deep Reinforcement Learning For Arcade Games' at Denmarks Technical University.
+This is the python code for my master thesis titled 'Deep Reinforcement Learning For Arcade Games' at Denmarks Technical University.
 
 My thesis is inspired by this DeepMind article http://arxiv.org/abs/1312.5602. My aim is to first replicate the article and use the results as a baseline. Subsequently I will attempt to improve the final score, the learning rate and/or the generalisability by: 
 - Using a range for reward instead of fixing them to -1,0,1
