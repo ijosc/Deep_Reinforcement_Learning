@@ -8,3 +8,10 @@ My thesis is inspired by this DeepMind article http://arxiv.org/abs/1312.5602. M
 - Implementing and experimenting with the saddle-free newton method (http://arxiv.org/abs/1406.2572)
 - Experimenting with different games and investigate the applicability of this method for transfer learning
 - Implement RNN layers and experiment with various configurations for final layers
+
+The tools I am using are
+[Deeppy](https://github.com/andersbll/deeppy),
+[CUDArray](https://github.com/andersbll/cudarray) and
+[Arcade Learning Environment](http://www.arcadelearningenvironment.org/).
+
+My code is based on [Replicating DeepMind](https://github.com/kristjankorjus/Replicating-DeepMind).
