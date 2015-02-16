@@ -1,16 +1,16 @@
 from utils.ale_interface import ALE
 from memory.memoryd import MemoryD
+from utils.game_actions import action_dict
 from ai.deepmind_net import net as net
+
 
 import random
 import numpy as np
-import time
 import sys
 import cPickle as pickle
 
 import deeppy as dp
-
-from os import linesep as NL
+import os
 
 class Main(object):
     """
@@ -22,9 +22,6 @@ class Main(object):
 
     # Size of the mini-batch, 32 was given in the paper, popular choice is 128
     minibatch_size = 32
-
-    # Number of possible actions in a given game, 6 for "Breakout"
-    number_of_actions = 6
 
     # Size of one frame
     frame_size = 84*84
@@ -41,7 +38,7 @@ class Main(object):
     epsilon_frames = 1000000.0
 
     # Epsilon during testing
-    test_epsilon = 0.05
+    test_epsilon = 0.00
 
     # Total frames played, only incremented during training
     total_frames_trained = 0
@@ -64,15 +61,22 @@ class Main(object):
     # The last 4 frames the system has seen
     current_state = None    
 
-    def __init__(self):
+    def __init__(self, game_name, prioritized_sweeping = False):
+
+
+        # Number of possible actions in a given game, 6 for "Breakout"
+        self.number_of_actions = len(action_dict[game_name])
+        valid_actions = action_dict[game_name]
+        net.layers[-2] = dp.FullyConnected(n_output=self.number_of_actions,
+            weights=dp.Parameter(dp.NormalFiller(sigma=0.1),
+                                 weight_decay=0.004, monitor=False))
         self.memory = MemoryD(self.memory_size)
-        self.ale = ALE(display_screen="false", skip_frames=4, game_ROM='ale/roms/breakout.bin')
+        self.ale = ALE(valid_actions, display_screen="false", skip_frames=4, game_ROM='ale/roms/'+game_name+'.bin')
         self.nnet = net
-        self.trainer =dp.StochasticGradientDescent(
-            max_epochs=10,
-            learn_rule=dp.Momentum(learn_rate=0.001, momentum=0.9),
-        )
         self.q_values = []
+        self.test_game_scores = []
+        self.prioritized_sweeping = prioritized_sweeping
+        self.deltas = []
 
     def compute_epsilon(self, frames_played):
         """
@@ -82,12 +86,12 @@ class Main(object):
         """
         return max(0.99 - frames_played / self.epsilon_frames, 0.1)
 
-    def predict_best_action(self, last_state):
+    def predict_best_action(self, last_state, train):
         # use neural net to predict Q-values for all actions
         qvalues = self.nnet.predict(last_state)
-        print "Predicted action Q-values: ", qvalues
-        self.q_values.append(np.max(qvalues))
-
+        # print "Predicted action Q-values: ", qvalues
+        if not train:
+            self.q_values.append(np.max(qvalues))
         # return action (index) with maximum Q-value
         return np.argmax(qvalues)
 
@@ -110,14 +114,21 @@ class Main(object):
         max_qvalues = np.max(post_qvalues, axis = 1)
 
         # update the Q-values for the actions we actually performed
+        # remember delta value for prioritized sweeping
         for i, action in enumerate(actions):
+            old_q = qvalues[i][action]
             qvalues[i][action] = rewards[i] + self.discount_factor * max_qvalues[i]
+            self.deltas.append(qvalues[i][action] - old_q)
 
-        train_input = dp.SupervisedInput(prestates.x, qvalues, batch_size=32)
+        # check whether new state with delta should go into prio-queue
+        if self.prioritized_sweeping:
+            update_PSminibatch(self.minibatch_size, delta)
+
+        train_input = dp.SupervisedInput(prestates.x, qvalues, batch_size=self.minibatch_size)
         self.trainer.train(net, train_input)
 
         error = self.nnet.error(train_input)
-        print "error: " + str(error)
+        # print "error: " + str(error)
 
         return error
         
@@ -156,7 +167,7 @@ class Main(object):
         game_score = 0
         if train and epoch==1:
             self.current_state = dp.Input(self.current_state)
-            self.current_state.y_shape=(1,6)
+            self.current_state.y_shape=(1,self.number_of_actions)
             self.nnet._setup(self.current_state)
 
         # Play games until maximum number is reached
@@ -170,11 +181,11 @@ class Main(object):
             # Some times random action is chosen 
             if random.uniform(0, 1) < epsilon:
                 action = random.choice(range(self.number_of_actions))
-                print "Chose random action %d" % action
+                # print "Chose random action %d" % action
             # Usually neural net chooses the best action
             else:
-                action = self.predict_best_action(self.current_state)
-                print "Neural net chose action %d" % int(action)
+                action = self.predict_best_action(self.current_state, train)
+                # print "Neural net chose action %d" % int(action)
 
             # Make the move. Returns points received and the new state
             points, next_frame = self.ale.move(action)
@@ -208,8 +219,11 @@ class Main(object):
                 # Increase total frames only when training
                 self.total_frames_trained += 1
 
-                # Fetch random minibatch from memory
-                minibatch = self.memory.get_minibatch(self.minibatch_size)
+                if self.prioritized_sweeping:
+                    minibatch = self.memory.get_PSminibatch()
+                else:
+                    # Fetch random minibatch from memory
+                    minibatch = self.memory.get_minibatch(self.minibatch_size)
 
                 # Train neural net with the minibatch
                 self.train_minibatch(minibatch)
@@ -250,7 +264,11 @@ class Main(object):
 
         for epoch in range(1, epochs + 1):
             print "Epoch %d:" % epoch
-
+            learn_rate = 0.0001*1/float(epoch)
+            self.trainer =dp.StochasticGradientDescent(
+                max_epochs=1,
+                learn_rule=dp.RMSProp(learn_rate=learn_rate, decay=0.9, max_scaling=1e3),
+            )
             if training_frames > 0:
                 # play number of frames with training and epsilon annealing
                 print "  Training for %d frames" % training_frames
@@ -260,7 +278,7 @@ class Main(object):
             if testing_frames > 0:
                 # play number of frames without training and without epsilon annealing
                 print "  Testing for %d frames" % testing_frames
-                testing_scores = self.play_games(testing_frames, epoch, train = False, epsilon = self.test_epsilon)
+                self.test_game_scores.append(self.play_games(testing_frames, epoch, train = False, epsilon = self.test_epsilon))
 
                 # Pick random states to calculate Q-values for
                 if self.random_states is None and self.memory.count > self.nr_random_states:
@@ -281,8 +299,10 @@ class Main(object):
                     avg_qvalue = 0
 
         # save q-values to review learning progress
-        pickle.dump([self.q_values,testing_scores], open("q_values.p", "wb" ))
-        pickle.dump(self.nnet, open("nnet.p", "wb" ))
+        # pickle.dump([self.q_values,avg_qvalue], open("q_values.p", "wb" ))
+        # pickle.dump(self.nnet, open("nnet.p", "wb" ))
+        # pickle.dump(self.test_game_scores, open("test_scores.p", "wb" ))
+        pickle.dump(self.deltas, open("deltas.p", "wb" ))
 
 if __name__ == '__main__':
     # take some parameters from command line, otherwise use defaults
@@ -290,5 +310,8 @@ if __name__ == '__main__':
     training_frames = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
     testing_frames = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
 
-    m = Main()
+    os.remove('ale_fifo_in') if os.path.exists('ale_fifo_in') else None
+    os.remove('ale_fifo_out') if os.path.exists('ale_fifo_out') else None
+
+    m = Main('breakout')
     m.run(epochs, training_frames, testing_frames)

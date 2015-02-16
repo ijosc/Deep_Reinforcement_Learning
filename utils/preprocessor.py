@@ -32,8 +32,8 @@ class Preprocessor:
         hexs = [cropped[i*2:i*2+2] for i in range(len(cropped)/2)]
 
         # Map each element of the list to the corresponding gray value
-        grays = np.asarray(map(lambda hex_val: arr[int(hex_val[1], 16) ,int(hex_val[0], 16)], hexs))
-
+        grays = np.asarray(map(lambda hex_val: arr[int(hex_val[1], 16)/2 ,int(hex_val[0], 16)], hexs))
+  
         # Turn the array into an image object and downscale
         img = Image.fromarray(grays.reshape((160, 160)))
         new_size = self.desired_image_size, self.desired_image_size

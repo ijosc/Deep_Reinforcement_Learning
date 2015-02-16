@@ -45,10 +45,10 @@ net = dp.NeuralNetwork(
         ),
         dp.Activation('relu'),
         dp.FullyConnected(
-            n_output=2	,
+            n_output=6	,
             weights=dp.Parameter(dp.NormalFiller(sigma=0.1),
                                  weight_decay=0.004, monitor=True),
         ),
-        dp.MultinomialLogReg(),
+        dp.MeanSquaredError(),
     ],
 )

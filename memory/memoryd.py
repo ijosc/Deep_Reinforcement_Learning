@@ -42,6 +42,7 @@ class MemoryD:
         self.rewards = np.empty((n,), dtype=np.float64)
         self.time = np.empty((n,), dtype=np.uint32)
         self.count = -1
+        self.PS_queue = [] #indices of states in PS queue
 
     def add_first(self, next_screen):
         """
@@ -140,7 +141,6 @@ class MemoryD:
                 state = self.screens[index - 3:index + 1]
             state = state[:,0,:,:]
 
-        # neural network expects flat input and np.ravel does just that
         return state
 
     def get_last_state(self):
@@ -150,3 +150,23 @@ class MemoryD:
         """
 
         return self.get_state(self.count)
+
+
+    def update_PSminibatch(self, size):
+        '''
+        update the queue of prioritized states by checking whether the delta
+        of the new state is larger than the smallest delta in the current 
+        queue. Delete state with smallest delta afterwards.
+        '''
+
+    def get_PSminibatch(self, size):
+        '''
+        get the current queue of prioritized states of size minibatch
+        '''
+        prestates = np.empty((size,4,84,84), dtype = np.float64)
+        actions = np.empty((size), dtype=np.float64)
+        rewards = np.empty((size), dtype=np.float64)
+        poststates = np.empty((size,4,84,84), dtype = np.float64)
+
+        
+        return [prestates, actions, rewards, poststates]

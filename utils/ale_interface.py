@@ -9,8 +9,13 @@ import traceback
 import random
 import sys
 
+from signal import signal, SIGPIPE, SIG_DFL
+signal(SIGPIPE,SIG_DFL) 
+
 class ALE:
-    actions = [np.uint8(0), np.uint8(1), np.uint8(3), np.uint8(4), np.uint8(11), np.uint8(12)]
+    all_actions = []
+    for i in range(18):
+        all_actions.append(np.uint8(i))
     current_points = 0
     next_screen = ""
     game_over = False
@@ -21,7 +26,7 @@ class ALE:
     fout = ""
     preprocessor = None
     
-    def __init__(self, display_screen, skip_frames, game_ROM):
+    def __init__(self, valid_actions, display_screen, skip_frames, game_ROM):
         """
         Initialize ALE class. Creates the FIFO pipes, launches ./ale and does the "handshake" phase of communication
 
@@ -35,15 +40,15 @@ class ALE:
         self.game_ROM = game_ROM
 
         #: create FIFO pipes
-        os.system("mkfifo ale_fifo_out")
-        os.system("mkfifo ale_fifo_in")
+        os.mkfifo("ale_fifo_out")
+        os.mkfifo("ale_fifo_in")
 
         #: launch ALE with appropriate commands in the background
         command='./ale/ale -max_num_episodes 0 -game_controller fifo_named -disable_colour_averaging true -run_length_encoding false -frame_skip '+str(self.skip_frames)+' -display_screen '+self.display_screen+" "+self.game_ROM+" &"
         os.system(command)
 
         #: open communication with pipes
-        self.fin = open('ale_fifo_out')
+        self.fin = open('ale_fifo_out', 'r')
         self.fout = open('ale_fifo_in', 'w')
         
         input = self.fin.readline()[:-1]
@@ -58,6 +63,7 @@ class ALE:
         self.next_image = []
         self.game_over = True
         self.current_points = 0
+        self.actions = [self.all_actions[i] for i in valid_actions]
 
         #: initialise preprocessor
         self.preprocessor = Preprocessor()
@@ -74,7 +80,7 @@ class ALE:
 
         #: send the fist command
         #  first command has to be 1,0 or 1,1, because the game starts when you press "fire!",
-        self.fout.write("1,0\n")
+        self.fout.write("1,19\n")
         self.fout.flush()
         self.fin.readline()
 
@@ -103,15 +109,11 @@ class ALE:
         #: Convert index to action
         action = self.actions[action_index]
 
-	#: Generate a random number for the action of player B
-        action_b = random.choice(range(255))
-
-
         #: Write and send to ALE stuff
-        self.fout.write(str(action)+","+str(action_b)+"\n")
-        #print "sent action to ALE: ",  str(action)+",0"
+        
+        self.fout.write(str(action)+","+str(19)+"\n")
+        # self.fout.write(str(action)+"\n")
         self.fout.flush()
-
         #: Read from ALE
         line = self.fin.readline()
         try:
@@ -123,5 +125,6 @@ class ALE:
             print line
             exit()
         self.game_over = bool(int(episode_info.split(",")[0]))
+
         self.current_points = int(episode_info.split(",")[1])
         return self.current_points, self.preprocessor.process(self.next_image)
