@@ -3,3 +3,4 @@
 mt.sublime-project
 mt.sublime-workspace
 *.pyc
+/roms/*
