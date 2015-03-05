@@ -3,7 +3,6 @@ from memory.memoryd import MemoryD
 from utils.game_actions import action_dict
 from ai.deepmind_net import net as net
 
-
 import random
 import numpy as np
 import sys
@@ -16,67 +15,50 @@ class Main(object):
     """
     Main class for starting training and testing
    """
- 
-    # How many transitions to keep in memory?
-    memory_size = 500000
 
-    # Size of the mini-batch, 32 was given in the paper, popular choice is 128
+    memory_size = 500000
+    memory = None
+
     minibatch_size = 32
 
-    # Size of one frame
     frame_size = 84*84
 
     state_length = 4 
-
-    # Size of one state is four 84x84 screens
     state_size = state_length * frame_size
 
-    # Discount factor for future rewards
     discount_factor = 0.9
-
-    # Exploration rate annealing speed
     epsilon_frames = 1000000.0
+    test_epsilon = 0.05
 
-    # Epsilon during testing
-    test_epsilon = 0.00
-
-    # Total frames played, only incremented during training
     total_frames_trained = 0
-
-    # Number of random states to use for calculating Q-values
     nr_random_states = 100
-
-    # Random states that we use to calculate Q-values
     random_states = None
 
-    # Memory itself
-    memory = None
-
-    # Neural net
     nnet = None
-
-    # Communication with ALE
     ale = None
 
-    # The last 4 frames the system has seen
     current_state = None    
 
-    def __init__(self, game_name, prioritized_sweeping = False):
+    def __init__(self, game_name, run_id):
 
-
-        # Number of possible actions in a given game, 6 for "Breakout"
         self.number_of_actions = len(action_dict[game_name])
         valid_actions = action_dict[game_name]
+
         net.layers[-2] = dp.FullyConnected(n_output=self.number_of_actions,
             weights=dp.Parameter(dp.NormalFiller(sigma=0.1),
-                                 weight_decay=0.004, monitor=False))
+                                 weight_decay=0.004, 
+                                 monitor=False))
+
         self.memory = MemoryD(self.memory_size)
-        self.ale = ALE(valid_actions, display_screen="false", skip_frames=4, game_ROM='ale/roms/'+game_name+'.bin')
+
+        self.ale = ALE(valid_actions, 
+            run_id, display_screen="false", 
+            skip_frames=4, 
+            game_ROM='ale/roms/'+game_name+'.bin')
+
         self.nnet = net
         self.q_values = []
         self.test_game_scores = []
-        self.prioritized_sweeping = prioritized_sweeping
-        self.deltas = []
 
     def compute_epsilon(self, frames_played):
         """
@@ -86,13 +68,13 @@ class Main(object):
         """
         return max(0.99 - frames_played / self.epsilon_frames, 0.1)
 
-    def predict_best_action(self, last_state, train):
-        # use neural net to predict Q-values for all actions
+    def predict_action(self, last_state, train):
+        '''use neural net to predict Q-values for all actions
+        return action (index) with maximum Q-value'''
+
         qvalues = self.nnet.predict(last_state)
-        # print "Predicted action Q-values: ", qvalues
-        if not train:
-            self.q_values.append(np.max(qvalues))
-        # return action (index) with maximum Q-value
+        if not train: self.q_values.append(np.max(qvalues))
+
         return np.argmax(qvalues)
 
     def train_minibatch(self, minibatch):
@@ -116,21 +98,11 @@ class Main(object):
         # update the Q-values for the actions we actually performed
         # remember delta value for prioritized sweeping
         for i, action in enumerate(actions):
-            old_q = qvalues[i][action]
             qvalues[i][action] = rewards[i] + self.discount_factor * max_qvalues[i]
-            self.deltas.append(qvalues[i][action] - old_q)
-
-        # check whether new state with delta should go into prio-queue
-        if self.prioritized_sweeping:
-            update_PSminibatch(self.minibatch_size, delta)
 
         train_input = dp.SupervisedInput(prestates.x, qvalues, batch_size=self.minibatch_size)
+
         self.trainer.train(net, train_input)
-
-        error = self.nnet.error(train_input)
-        # print "error: " + str(error)
-
-        return error
         
     def play_games(self, nr_frames, epoch, train, epsilon = None):
         """
@@ -139,97 +111,61 @@ class Main(object):
         @param train: true or false, whether to do training or not
         @param epsilon: fixed epsilon, only used when not training
         """
-        # assert train or epsilon is not None
 
         frames_played = 0
         game_scores = []
 
-        # Start a new game
         first_frame = self.ale.new_game()
-        if train:
-            self.memory.add_first(first_frame)
-        else:  # if testing we dont write anything to memory
-            pass
+        if train: self.memory.add_first(first_frame)
 
-        # We need to initialize/update the current state
         if self.current_state == None:
-            print "current state is none"
             self.current_state = np.empty((1, self.state_length, 84, 84), dtype=np.float64)
             for i in range(self.state_length):
-                self.current_state[0,i,:,:] = first_frame.copy()
+                self.current_state[0, i, :, :] = first_frame.copy()
         else:
-            for i in range(self.state_length):
-                if i<3:
-                    self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
-                else:
-                    self.current_state.x[0,i,:,:] = first_frame.copy()
+            self.current_state.x[0, :-1, :, :] = self.current_state.x[0, 1:, :, :] 
+            self.current_state.x[0, -1, :, :] = first_frame.copy()
 
         game_score = 0
-        if train and epoch==1:
+
+        if train and epoch == 1:
             self.current_state = dp.Input(self.current_state)
-            self.current_state.y_shape=(1,self.number_of_actions)
+            self.current_state.y_shape = (1,self.number_of_actions)
             self.nnet._setup(self.current_state)
 
-        # Play games until maximum number is reached
         while frames_played < nr_frames:
-
-            # Epsilon decreases over time only when training
             if train:
                 epsilon = self.compute_epsilon(self.total_frames_trained)
-                print "Current annealed epsilon is %f at %d frames" % (epsilon, self.total_frames_trained)
 
-            # Some times random action is chosen 
             if random.uniform(0, 1) < epsilon:
                 action = random.choice(range(self.number_of_actions))
-                # print "Chose random action %d" % action
-            # Usually neural net chooses the best action
             else:
-                action = self.predict_best_action(self.current_state, train)
-                # print "Neural net chose action %d" % int(action)
+                action = self.predict_action(self.current_state, train)
 
-            # Make the move. Returns points received and the new state
             points, next_frame = self.ale.move(action)
 
             # Changing points to rewards
             if points > 0:
                 print "    Got %d points" % points
                 reward = 1
+            elif points < 0:
+                print "    Lost %d points" % points
+                reward = -1
             else:
                 reward = 0
 
-            # Book keeping
             game_score += points
             frames_played += 1
-            #print "Played frame %d" % frames_played
 
-            # We need to update the current state
+            self.current_state.x[0, :-1, :, :] = self.current_state.x[0, 1:,:,:] 
+            self.current_state.x[0, -1, :, :] = next_frame
 
-            for i in range(self.state_length):
-                if i<3:
-                    self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
-                else:
-                    self.current_state.x[0,i,:,:] = next_frame
-
-            # Only if training
             if train:
-
-                # Store new information to memory
                 self.memory.add(action, reward, next_frame)
-
-                # Increase total frames only when training
                 self.total_frames_trained += 1
-
-                if self.prioritized_sweeping:
-                    minibatch = self.memory.get_PSminibatch()
-                else:
-                    # Fetch random minibatch from memory
-                    minibatch = self.memory.get_minibatch(self.minibatch_size)
-
-                # Train neural net with the minibatch
+                minibatch = self.memory.get_minibatch(self.minibatch_size)
                 self.train_minibatch(minibatch)
-                #print "Trained minibatch of size %d" % self.minibatch_size
 
-            # Play until game is over
             if self.ale.game_over:
                 print "    Game over, score = %d" % game_score
                 # After "game over" increase the number of games played
@@ -238,28 +174,18 @@ class Main(object):
 
                 # And do stuff after end game
                 self.ale.end_game()
-                if train:
-                    self.memory.add_last()
-                else:
-                    pass
+                if train: self.memory.add_last()
+
                 first_frame = self.ale.new_game()
-                if train:
-                    self.memory.add_first(first_frame)
-                else:  # if testing we dont write anything to memory
-                    pass
+                if train: self.memory.add_first(first_frame)
 
-                # We need to update the current state
-                for i in range(self.state_length):
-                    if i<3:
-                        self.current_state.x[0,i,:,:] = self.current_state.x[0,i+1,:,:]
-                    else:
-                        self.current_state.x[0,i,:,:] = first_frame.copy()
+                self.current_state.x[0, :-1, :, :] = self.current_state.x[0, 1:,:,:] 
+                self.current_state.x[0, -1, :, :] = first_frame.copy()
 
-
-        # reset the game just in case
         self.ale.end_game()
 
         return game_scores
+
     def run(self, epochs, training_frames, testing_frames):
 
         for epoch in range(1, epochs + 1):
@@ -302,16 +228,16 @@ class Main(object):
         # pickle.dump([self.q_values,avg_qvalue], open("q_values.p", "wb" ))
         # pickle.dump(self.nnet, open("nnet.p", "wb" ))
         # pickle.dump(self.test_game_scores, open("test_scores.p", "wb" ))
-        pickle.dump(self.deltas, open("deltas.p", "wb" ))
 
 if __name__ == '__main__':
     # take some parameters from command line, otherwise use defaults
     epochs = int(sys.argv[1]) if len(sys.argv) > 1 else 100
     training_frames = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
     testing_frames = int(sys.argv[3]) if len(sys.argv) > 3 else 1000
+    run_id = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 
-    os.remove('ale_fifo_in') if os.path.exists('ale_fifo_in') else None
-    os.remove('ale_fifo_out') if os.path.exists('ale_fifo_out') else None
+    os.remove('ale_fifo_in_%i' % run_id) if os.path.exists('ale_fifo_in_%i' % run_id) else None
+    os.remove('ale_fifo_out_%i' % run_id) if os.path.exists('ale_fifo_out_%i' % run_id) else None
 
-    m = Main('breakout')
+    m = Main('asteroids', run_id)
     m.run(epochs, training_frames, testing_frames)

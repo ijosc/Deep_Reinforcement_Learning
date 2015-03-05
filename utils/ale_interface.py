@@ -26,7 +26,7 @@ class ALE:
     fout = ""
     preprocessor = None
     
-    def __init__(self, valid_actions, display_screen, skip_frames, game_ROM):
+    def __init__(self, valid_actions, run_id, display_screen, skip_frames, game_ROM):
         """
         Initialize ALE class. Creates the FIFO pipes, launches ./ale and does the "handshake" phase of communication
 
@@ -38,19 +38,24 @@ class ALE:
         self.display_screen = display_screen
         self.skip_frames = skip_frames
         self.game_ROM = game_ROM
+        self.run_id = run_id
 
         #: create FIFO pipes
-        os.mkfifo("ale_fifo_out")
-        os.mkfifo("ale_fifo_in")
+        os.mkfifo("ale_fifo_out_%i" % self.run_id)
+        os.mkfifo("ale_fifo_in_%i" % self.run_id)
 
         #: launch ALE with appropriate commands in the background
-        command='./ale/ale -max_num_episodes 0 -game_controller fifo_named -disable_colour_averaging true -run_length_encoding false -frame_skip '+str(self.skip_frames)+' -display_screen '+self.display_screen+" "+self.game_ROM+" &"
+        command='./ale/ale -max_num_episodes 0 -game_controller fifo_named -disable_colour_averaging true -run_length_encoding false -frame_skip '+str(self.skip_frames) + ' -run_id ' + str(self.run_id) + ' -display_screen '+self.display_screen+" "+self.game_ROM+" &"
         os.system(command)
 
+        os.system('ls -l ale_fifo_out_%i' % self.run_id)
+        os.system('ls -l ale_fifo_in_%i' % self.run_id)
+
         #: open communication with pipes
-        self.fin = open('ale_fifo_out', 'r')
-        self.fout = open('ale_fifo_in', 'w')
-        
+
+        self.fin = open('ale_fifo_out_%i' % self.run_id)
+        self.fout = open('ale_fifo_in_%i' % self.run_id, 'w')
+
         input = self.fin.readline()[:-1]
         size = input.split("-")  # saves the image sizes (160*210) for breakout
 
