@@ -38,9 +38,14 @@ class MemoryD:
         """
         self.size = n
         self.screens = np.empty((n, 1, 84, 84), dtype=np.float64)
-        self.actions = np.empty((n,), dtype=np.uint8)
-        self.rewards = np.empty((n,), dtype=np.float64)
-        self.time = np.empty((n,), dtype=np.uint32)
+        #self.actions = np.empty((n,), dtype=np.uint8)
+        #self.rewards = np.empty((n,), dtype=np.float64)
+        #self.time = np.empty((n,), dtype=np.uint32)
+        self.actions = np.zeros((n,), dtype=np.uint8)  
+        # if here the initial elements are not set to be 0, this will lead to the bug that 
+        # actions exceed the range 
+        self.rewards = np.zeros((n,), dtype=np.float64)
+        self.time = np.zeros((n,), dtype=np.uint32)
         self.count = -1
         self.PS_queue = [] #indices of states in PS queue
 
